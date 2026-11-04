@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt"
 import { makeClient, latestAssistantReply, parseModelRef, type MessageInfo } from "./opencode"
 import { StateStore } from "./state"
-import { chunkText, formatCheckin, formatSlackContext, mrkdwnEscape, type SlackContextMessage } from "./slackText"
+import { chunkText, formatCheckin, formatSlackContext, markdownToMrkdwn, mrkdwnEscape, type SlackContextMessage } from "./slackText"
 
 /**
  * opencode-slack-bot — Socket Mode Slack app that drives OpenCode.
@@ -491,7 +491,11 @@ async function handleEvent(rawEvent: unknown): Promise<void> {
       await finishProgress(sessionID)
       const context = unwrap(await client.session.context({ sessionID })) as MessageInfo[] | undefined
       const reply = Array.isArray(context) ? latestAssistantReply(context) : ""
-      await postChunked(thread.channel, reply || "_(finished — no text output)_", replyThreadTs)
+      await postChunked(
+        thread.channel,
+        reply ? markdownToMrkdwn(reply) : "_(finished — no text output)_",
+        replyThreadTs,
+      )
       break
     }
     case "session.execution.failed": {

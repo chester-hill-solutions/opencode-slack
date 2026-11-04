@@ -56,6 +56,7 @@ Requires [Bun](https://bun.sh) ≥ 1.1. By default the bot discovers and starts 
 - **Commands:** `!stop` interrupt · `!new` fresh session · `!leave` stop following a channel · `!status` · `!help`.
 - **Permissions:** when OpenCode asks to run something sensitive, the bot posts *Approve once / Always allow / Deny* buttons; the decision is recorded in the session.
 - **Progress:** while a run is in flight the bot keeps one message in the thread updated (`⏳ OpenCode working — 7 steps · 1m 20s · last tool: bash`), then deletes it when the reply lands. Interval: `OPENCODE_SLACK_CHECKIN_SECONDS` (default 45).
+- **Formatting:** the reply is Markdown, so it is converted to Slack mrkdwn before posting — headings become bold, `**bold**` becomes `*bold*`, `*italic*` becomes `_italic_`, `[label](url)` becomes `<url|label>`, `-` lists get Slack bullets, and pipe tables are re-emitted inside a code block. Fenced and inline code are passed through untouched.
 - **Resilience:** the live event stream reconnects with backoff (1s → 30s), so a network blip doesn't leave the bot deaf.
 
 ## Configuration

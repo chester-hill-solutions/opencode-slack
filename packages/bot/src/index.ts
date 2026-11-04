@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt"
 import { makeClient, latestAssistantReply, parseModelRef, type MessageInfo } from "./opencode"
 import { StateStore } from "./state"
-import { chunkText, mrkdwnEscape } from "./slackText"
+import { chunkText, formatCheckin, mrkdwnEscape } from "./slackText"
 
 /**
  * opencode-slack-bot — Socket Mode Slack app that drives OpenCode.
@@ -305,100 +305,211 @@ async function updateButtons(channel: string | undefined, ts: string | undefined
   await slack.chat.update({ channel, ts, text, blocks: [{ type: "section", text: { type: "mrkdwn", text } }] })
 }
 
-// --- OpenCode event stream → Slack -----------------------------------------
+// --- progress check-ins -----------------------------------------------------
 
-void (async () => {
-  const types = [
-    "session.execution.succeeded",
-    "session.execution.failed",
-    "session.execution.interrupted",
-    "permission.asked",
-  ]
-  for await (const rawEvent of client.event.subscribe({ types: types as never[] })) {
-    const event = rawEvent as any
-    const sessionID = event?.data?.sessionID as string | undefined
-    if (!sessionID) continue
-    const thread = state.getThread(sessionID)
-    if (!thread) continue // not a Slack-driven session
-    const isDm = thread.threadTs === "dm"
-    const replyThreadTs = isDm ? undefined : thread.threadTs
+const CHECKIN_SECONDS = Math.max(10, Number(process.env.OPENCODE_SLACK_CHECKIN_SECONDS ?? 45) || 45)
+const PROGRESS_MAX_MS = 30 * 60_000
 
-    try {
-      switch (event.type) {
-        case "session.execution.succeeded": {
-          const context = unwrap(await client.session.context({ sessionID })) as MessageInfo[] | undefined
-          const reply = Array.isArray(context) ? latestAssistantReply(context) : ""
-          await postChunked(thread.channel, reply || "_(finished — no text output)_", replyThreadTs)
-          break
-        }
-        case "session.execution.failed": {
-          const message = (event?.data?.error?.message as string | undefined) ?? "unknown error"
-          await postChunked(thread.channel, `❌ OpenCode failed: ${mrkdwnEscape(message)}`, replyThreadTs)
-          break
-        }
-        case "session.execution.interrupted": {
-          const reason = (event?.data?.reason as string | undefined) ?? "unknown"
-          await postChunked(thread.channel, `⏹️ OpenCode interrupted (${reason}).`, replyThreadTs)
-          break
-        }
-        case "permission.asked": {
-          const action = (event?.data?.action as string | undefined) ?? "unknown action"
-          const resources = Array.isArray(event?.data?.resources) ? (event.data.resources as string[]) : []
-          const requestID = event?.data?.id as string | undefined
-          if (!requestID) break
-          const resourceList =
-            resources.map((r) => `• \`${mrkdwnEscape(String(r))}\``).join("\n") || "• _(no resources)_"
-          await slack.chat.postMessage({
-            channel: thread.channel,
-            ...(replyThreadTs ? { thread_ts: replyThreadTs } : {}),
-            text: `🔐 Approval needed — ${action}`,
-            blocks: [
+interface Progress {
+  channel: string
+  threadTs?: string
+  statusTs?: string
+  steps: number
+  tool?: string
+  startedAt: number
+  lastUpdate: number
+}
+
+const progress = new Map<string, Progress>()
+
+function startProgress(sessionID: string, channel: string, threadTs?: string): Progress {
+  const existing = progress.get(sessionID)
+  if (existing) return existing
+  const now = Date.now()
+  const created: Progress = { channel, threadTs, steps: 0, startedAt: now, lastUpdate: now }
+  progress.set(sessionID, created)
+  return created
+}
+
+async function checkin(p: Progress): Promise<void> {
+  const now = Date.now()
+  if (now - p.lastUpdate < CHECKIN_SECONDS * 1000) return
+  p.lastUpdate = now
+  const text = formatCheckin(p.steps, now - p.startedAt, p.tool)
+  try {
+    if (p.statusTs) {
+      await slack.chat.update({ channel: p.channel, ts: p.statusTs, text })
+    } else {
+      const res = await slack.chat.postMessage({
+        channel: p.channel,
+        text,
+        ...(p.threadTs ? { thread_ts: p.threadTs } : {}),
+      })
+      p.statusTs = res.ts
+    }
+  } catch (err) {
+    console.warn("[opencode-slack-bot] check-in failed:", err)
+  }
+}
+
+async function finishProgress(sessionID: string): Promise<void> {
+  const p = progress.get(sessionID)
+  if (!p) return
+  progress.delete(sessionID)
+  if (!p.statusTs) return
+  try {
+    await slack.chat.delete({ channel: p.channel, ts: p.statusTs })
+  } catch {
+    /* message already gone or delete refused — cosmetic */
+  }
+}
+
+// Keep the check-in fresh even while the agent sits inside one long tool call.
+const checkinTimer = setInterval(
+  () => {
+    const now = Date.now()
+    for (const [sessionID, p] of progress) {
+      if (now - p.startedAt > PROGRESS_MAX_MS) {
+        void finishProgress(sessionID)
+        continue
+      }
+      void checkin(p)
+    }
+  },
+  Math.max(5, Math.floor(CHECKIN_SECONDS / 3)) * 1000,
+)
+checkinTimer.unref?.()
+
+// --- OpenCode event stream → Slack (auto-reconnecting) ----------------------
+
+const EVENT_TYPES = [
+  "session.step.started",
+  "session.tool.input.started",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "permission.asked",
+]
+
+async function handleEvent(rawEvent: unknown): Promise<void> {
+  const event = rawEvent as any
+  const sessionID = event?.data?.sessionID as string | undefined
+  if (!sessionID) return
+  const thread = state.getThread(sessionID)
+  if (!thread) return // not a Slack-driven session
+  const isDm = thread.threadTs === "dm"
+  const replyThreadTs = isDm ? undefined : thread.threadTs
+
+  switch (event.type) {
+    case "session.step.started": {
+      const p = startProgress(sessionID, thread.channel, replyThreadTs)
+      p.steps++
+      await checkin(p)
+      break
+    }
+    case "session.tool.input.started": {
+      const p = startProgress(sessionID, thread.channel, replyThreadTs)
+      if (typeof event.data?.name === "string") p.tool = event.data.name
+      await checkin(p)
+      break
+    }
+    case "session.execution.succeeded": {
+      await finishProgress(sessionID)
+      const context = unwrap(await client.session.context({ sessionID })) as MessageInfo[] | undefined
+      const reply = Array.isArray(context) ? latestAssistantReply(context) : ""
+      await postChunked(thread.channel, reply || "_(finished — no text output)_", replyThreadTs)
+      break
+    }
+    case "session.execution.failed": {
+      await finishProgress(sessionID)
+      const message = (event?.data?.error?.message as string | undefined) ?? "unknown error"
+      await postChunked(thread.channel, `❌ OpenCode failed: ${mrkdwnEscape(message)}`, replyThreadTs)
+      break
+    }
+    case "session.execution.interrupted": {
+      await finishProgress(sessionID)
+      const reason = (event?.data?.reason as string | undefined) ?? "unknown"
+      await postChunked(thread.channel, `⏹️ OpenCode interrupted (${reason}).`, replyThreadTs)
+      break
+    }
+    case "permission.asked": {
+      const action = (event?.data?.action as string | undefined) ?? "unknown action"
+      const resources = Array.isArray(event?.data?.resources) ? (event.data.resources as string[]) : []
+      const requestID = event?.data?.id as string | undefined
+      if (!requestID) break
+      const resourceList =
+        resources.map((r) => `• \`${mrkdwnEscape(String(r))}\``).join("\n") || "• _(no resources)_"
+      await slack.chat.postMessage({
+        channel: thread.channel,
+        ...(replyThreadTs ? { thread_ts: replyThreadTs } : {}),
+        text: `🔐 Approval needed — ${action}`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `🔐 *Approval needed* — \`${mrkdwnEscape(action)}\`\n${resourceList}\nSession \`${sessionID}\``,
+            },
+          },
+          {
+            type: "actions",
+            elements: [
               {
-                type: "section",
-                text: {
-                  type: "mrkdwn",
-                  text: `🔐 *Approval needed* — \`${mrkdwnEscape(action)}\`\n${resourceList}\nSession \`${sessionID}\``,
-                },
+                type: "button",
+                text: { type: "plain_text", text: "Approve once" },
+                style: "primary",
+                action_id: "oc_perm_once",
+                value: JSON.stringify({ sessionID, requestID }),
               },
               {
-                type: "actions",
-                elements: [
-                  {
-                    type: "button",
-                    text: { type: "plain_text", text: "Approve once" },
-                    style: "primary",
-                    action_id: "oc_perm_once",
-                    value: JSON.stringify({ sessionID, requestID }),
-                  },
-                  {
-                    type: "button",
-                    text: { type: "plain_text", text: "Always allow" },
-                    action_id: "oc_perm_always",
-                    value: JSON.stringify({ sessionID, requestID }),
-                  },
-                  {
-                    type: "button",
-                    text: { type: "plain_text", text: "Deny" },
-                    style: "danger",
-                    action_id: "oc_perm_reject",
-                    value: JSON.stringify({ sessionID, requestID }),
-                  },
-                ],
+                type: "button",
+                text: { type: "plain_text", text: "Always allow" },
+                action_id: "oc_perm_always",
+                value: JSON.stringify({ sessionID, requestID }),
+              },
+              {
+                type: "button",
+                text: { type: "plain_text", text: "Deny" },
+                style: "danger",
+                action_id: "oc_perm_reject",
+                value: JSON.stringify({ sessionID, requestID }),
               },
             ],
-          })
-          break
+          },
+        ],
+      })
+      break
+    }
+  }
+}
+
+/** Subscribe, and reconnect with backoff whenever the live stream ends or fails. */
+async function eventLoop(): Promise<void> {
+  let backoff = 1000
+  for (;;) {
+    try {
+      for await (const rawEvent of client.event.subscribe({ types: EVENT_TYPES as never[] })) {
+        backoff = 1000 // a delivered event means the stream is healthy
+        try {
+          await handleEvent(rawEvent)
+        } catch (err) {
+          console.error(`[opencode-slack-bot] failed to handle ${(rawEvent as any)?.type}:`, err)
         }
       }
     } catch (err) {
-      console.error(`[opencode-slack-bot] failed to handle ${event?.type}:`, err)
+      console.warn("[opencode-slack-bot] event stream error:", err)
     }
+    console.warn(`[opencode-slack-bot] event stream ended — reconnecting in ${Math.round(backoff / 1000)}s`)
+    await new Promise((resolve) => setTimeout(resolve, backoff))
+    backoff = Math.min(backoff * 2, 30_000)
   }
-  console.warn("[opencode-slack-bot] event subscription ended")
-})().catch((err) => console.error("[opencode-slack-bot] event stream crashed:", err))
+}
+
+void eventLoop()
 
 await app.start()
 log(
   `ready — connected to OpenCode, directory: ${directory}` +
-    (model ? `, model: ${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}` : ", model: location default"),
+    (model ? `, model: ${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}` : ", model: location default") +
+    `, check-in: ${CHECKIN_SECONDS}s`,
 )

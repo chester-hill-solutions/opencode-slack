@@ -52,6 +52,8 @@ Requires [Bun](https://bun.sh) ≥ 1.1. By default the bot discovers and starts 
 - **Commands (in-thread or DM):** `!stop` interrupt, `!new` fresh session, `!status`, `!help`.
 - **Permissions:** when OpenCode asks to run something sensitive, the bot posts *Approve once / Always allow / Deny* buttons. The decision is recorded in the session.
 - Replies appear when the session finishes (live event stream; if the bot is down during a run, that reply is missed).
+- While a session runs, the bot keeps **one** message in the thread updated (`⏳ OpenCode working — 7 steps · 1m 20s · last tool: bash`) every `OPENCODE_SLACK_CHECKIN_SECONDS` (default 45), then deletes it when the reply lands.
+- The event stream auto-reconnects with backoff (1s → 30s) if it drops, so the bot doesn't go deaf after a network blip.
 
 The directory new sessions operate on is `OPENCODE_DIRECTORY` (defaults to the bot's cwd). Session↔thread mappings persist in `~/.local/share/opencode-slack/state.json` (override with `OPENCODE_SLACK_STATE`).
 

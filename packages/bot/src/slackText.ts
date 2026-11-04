@@ -20,3 +20,13 @@ export function chunkText(text: string, limit: number = LIMIT): string[] {
 export function mrkdwnEscape(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
+
+/** One-line progress check-in for a running session. */
+export function formatCheckin(steps: number, elapsedMs: number, tool?: string): string {
+  const seconds = Math.max(0, Math.round(elapsedMs / 1000))
+  const elapsed =
+    seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`
+  const parts = [`⏳ OpenCode working — ${steps} step${steps === 1 ? "" : "s"}`, elapsed]
+  if (tool) parts.push(`last tool: \`${tool}\``)
+  return parts.join(" · ")
+}

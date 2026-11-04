@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { chunkText, mrkdwnEscape } from "../packages/bot/src/slackText"
+import { chunkText, formatCheckin, mrkdwnEscape } from "../packages/bot/src/slackText"
 
 describe("chunkText", () => {
   test("returns a single chunk for short input", () => {
@@ -32,5 +32,16 @@ describe("chunkText", () => {
 describe("mrkdwnEscape", () => {
   test("escapes &, <, >", () => {
     expect(mrkdwnEscape("a & <b>")).toBe("a &amp; &lt;b&gt;")
+  })
+})
+
+describe("formatCheckin", () => {
+  test("includes step count, seconds and last tool", () => {
+    expect(formatCheckin(1, 12_000, "bash")).toBe("⏳ OpenCode working — 1 step · 12s · last tool: `bash`")
+  })
+
+  test("switches to minutes and pads seconds", () => {
+    expect(formatCheckin(3, 72_000)).toBe("⏳ OpenCode working — 3 steps · 1m 12s")
+    expect(formatCheckin(4, 65_000)).toBe("⏳ OpenCode working — 4 steps · 1m 05s")
   })
 })

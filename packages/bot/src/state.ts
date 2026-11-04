@@ -39,6 +39,11 @@ export class StateStore {
   }
 
   setByKey(key: string, sessionID: string, replyTs?: string): void {
+    const previous = this.threads.get(key)
+    // Adopting a different session for this conversation (e.g. `!sessions 3`)
+    // must drop the old session's reverse mapping, or a still-running old
+    // session would post its reply into this thread.
+    if (previous && previous.sessionID !== sessionID) this.sessionToKey.delete(previous.sessionID)
     this.threads.set(key, replyTs ? { sessionID, replyTs } : { sessionID })
     this.sessionToKey.set(sessionID, key)
     this.save()

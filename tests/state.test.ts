@@ -58,6 +58,14 @@ describe("StateStore", () => {
     expect(store.getThread("ses_1")).toBeUndefined()
   })
 
+  test("adopting a new session drops the old session's reply route", () => {
+    const store = tempStore()
+    store.setByKey("C1:1.0001", "ses_old", "1.0001")
+    store.setByKey("C1:1.0001", "ses_new", "1.0001")
+    expect(store.getThread("ses_old")).toBeUndefined()
+    expect(store.getThread("ses_new")).toEqual({ channel: "C1", replyTs: "1.0001" })
+  })
+
   test("migrates the old bare-string state format", () => {
     dir = mkdtempSync(join(tmpdir(), "opencode-slack-test-"))
     const path = join(dir, "state.json")

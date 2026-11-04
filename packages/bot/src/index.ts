@@ -3,6 +3,14 @@ import { makeClient, latestAssistantReply, parseModelRef, type MessageInfo } fro
 import { StateStore } from "./state"
 import { chunkText, formatCheckin, formatSlackContext, markdownToMrkdwn, mrkdwnEscape, type SlackContextMessage } from "./slackText"
 import { conversationKey } from "./conversation"
+import {
+  formatModelList,
+  formatSessionList,
+  modelRef,
+  resolveSessionChoice,
+  type ModelSummary,
+  type SessionSummary,
+} from "./commands"
 
 /**
  * opencode-slack-bot — Socket Mode Slack app that drives OpenCode.
@@ -44,6 +52,24 @@ const log = (...args: unknown[]) => console.log("[opencode-slack-bot]", ...args)
 
 /** Slack envelopes wrap payloads in { data }; the client seems to unwrap them. Handle both. */
 const unwrap = (value: any): any => value?.data ?? value
+
+/** SDK calls may hand back `{ data: T[] }` or the array itself; normalise both. */
+function dataList<T>(value: unknown): T[] {
+  const unwrapped = (value as { data?: unknown } | null | undefined)?.data ?? value
+  return Array.isArray(unwrapped) ? (unwrapped as T[]) : []
+}
+
+/** How many sessions `!sessions` shows — and therefore how many numbers it accepts. */
+const SESSION_LIST_LIMIT = 10
+
+interface SessionListRow {
+  id: string
+  parentID?: string
+  title?: string
+  model?: { providerID: string; id: string; variant?: string }
+  time?: { created?: number; updated?: number }
+  location?: { directory?: string }
+}
 
 interface Incoming {
   channel: string
@@ -123,6 +149,8 @@ async function handleUserText(input: Incoming): Promise<void> {
         "• Mention me to start a session. I then follow this channel — every message feeds the same session, with thread context.",
         "• In a thread, mention me to give that thread its own session.",
         "• DMs are one continuous session.",
+        "• `!model` — list models; `!model provider/model` switches this conversation's model.",
+        "• `!sessions` — list recent sessions; `!sessions 2` switches this conversation to one.",
         "• `!stop` — interrupt the running session",
         "• `!new` — start a fresh session",
         "• `!leave` — stop following this channel",
@@ -167,6 +195,99 @@ async function handleUserText(input: Incoming): Promise<void> {
       )
     } catch (err) {
       await postChunked(channel, `⚠️ Couldn't fetch session \`${sessionID}\`: ${errorMessage(err)}`, replyThreadTs)
+    }
+    return
+  }
+
+  if (command === "!model") {
+    const ref = text.split(/\s+/).slice(1).join(" ").trim()
+    const activeSession = entry?.sessionID
+
+    if (!ref) {
+      try {
+        const [models, session] = await Promise.all([
+          client.model.list({ location: { directory } }),
+          activeSession
+            ? client.session.get({ sessionID: activeSession }).catch(() => undefined)
+            : Promise.resolve(undefined),
+        ])
+        const selected = unwrap(session) as { model?: { providerID: string; id: string; variant?: string } } | undefined
+        const current = selected?.model ? modelRef(selected.model) : undefined
+        await postChunked(
+          channel,
+          [
+            current
+              ? `Current model: \`${current}\``
+              : "_No session here yet — the first message creates one on the default model._",
+            formatModelList(dataList<ModelSummary>(models), { current }),
+          ].join("\n\n"),
+          replyThreadTs,
+        )
+      } catch (err) {
+        await postChunked(channel, `⚠️ Couldn't list models: ${errorMessage(err)}`, replyThreadTs)
+      }
+      return
+    }
+
+    if (!activeSession) {
+      await postChunked(channel, "No session here yet — send a message first, then `!model`.", replyThreadTs)
+      return
+    }
+    const parsed = parseModelRef(ref)
+    if (!parsed) {
+      await postChunked(
+        channel,
+        "Model refs look like `provider/model` or `provider/model#variant` — `!model` on its own lists them.",
+        replyThreadTs,
+      )
+      return
+    }
+    try {
+      await client.session.switchModel({ sessionID: activeSession, model: parsed })
+      await postChunked(channel, `🧠 This conversation now uses \`${ref}\`.`, replyThreadTs)
+    } catch (err) {
+      await postChunked(channel, `⚠️ Couldn't switch to \`${ref}\`: ${errorMessage(err)}`, replyThreadTs)
+    }
+    return
+  }
+
+  if (command === "!sessions" || command === "!session") {
+    const arg = text.split(/\s+/)[1] ?? ""
+    try {
+      const rows = dataList<SessionListRow>(await client.session.list({ limit: 20, order: "desc" }))
+      // Subagent children are not conversations a thread can adopt, and sessions
+      // from other directories would answer with the wrong workspace's context.
+      const summaries: SessionSummary[] = rows
+        .filter((row) => !row.parentID && (!row.location?.directory || row.location.directory === directory))
+        .map((row) => ({
+          id: String(row.id),
+          ...(row.title ? { title: row.title } : {}),
+          ...(row.time ? { time: row.time } : {}),
+          ...(row.model ? { model: row.model } : {}),
+        }))
+
+      if (!arg) {
+        await postChunked(
+          channel,
+          formatSessionList(summaries, { current: entry?.sessionID, limit: SESSION_LIST_LIMIT }),
+          replyThreadTs,
+        )
+        return
+      }
+
+      const choice = resolveSessionChoice(summaries.slice(0, SESSION_LIST_LIMIT), arg)
+      if (choice.kind === "error") {
+        await postChunked(channel, choice.message, replyThreadTs)
+        return
+      }
+
+      const target = choice.session
+      const detail = unwrap(await client.session.get({ sessionID: target.id })) as { title?: string } | undefined
+      state.setByKey(key, target.id, replyThreadTs)
+      const title = detail?.title ? ` — *${mrkdwnEscape(detail.title)}*` : ""
+      await postChunked(channel, `🔗 This conversation now continues \`${target.id}\`${title}.`, replyThreadTs)
+    } catch (err) {
+      await postChunked(channel, `⚠️ Couldn't list sessions: ${errorMessage(err)}`, replyThreadTs)
     }
     return
   }

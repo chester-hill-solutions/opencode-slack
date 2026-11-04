@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { latestAssistantReply, type MessageInfo } from "../packages/bot/src/opencode"
+import { latestAssistantReply, parseModelRef, type MessageInfo } from "../packages/bot/src/opencode"
 
 function user(text: string, created: number): MessageInfo {
   return { type: "user", text, time: { created } }
@@ -42,5 +42,30 @@ describe("latestAssistantReply", () => {
   test("returns empty string when there is no assistant output", () => {
     expect(latestAssistantReply([user("hi", 1)])).toBe("")
     expect(latestAssistantReply([])).toBe("")
+  })
+})
+
+describe("parseModelRef", () => {
+  test("parses provider/model", () => {
+    expect(parseModelRef("opencode-go/deepseek-v4.1-flash")).toEqual({
+      providerID: "opencode-go",
+      id: "deepseek-v4.1-flash",
+    })
+  })
+
+  test("parses a variant suffix", () => {
+    expect(parseModelRef("opencode-go/deepseek-v4.1-flash#high")).toEqual({
+      providerID: "opencode-go",
+      id: "deepseek-v4.1-flash",
+      variant: "high",
+    })
+  })
+
+  test("rejects malformed references", () => {
+    expect(parseModelRef(undefined)).toBeUndefined()
+    expect(parseModelRef("")).toBeUndefined()
+    expect(parseModelRef("no-slash")).toBeUndefined()
+    expect(parseModelRef("/missing-provider")).toBeUndefined()
+    expect(parseModelRef("missing-model/")).toBeUndefined()
   })
 })

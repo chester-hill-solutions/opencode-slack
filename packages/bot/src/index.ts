@@ -1,5 +1,5 @@
 import { App } from "@slack/bolt"
-import { makeClient, latestAssistantReply, type MessageInfo } from "./opencode"
+import { makeClient, latestAssistantReply, parseModelRef, type MessageInfo } from "./opencode"
 import { StateStore } from "./state"
 import { chunkText, mrkdwnEscape } from "./slackText"
 
@@ -26,6 +26,7 @@ if (!SLACK_BOT_TOKEN || !SLACK_APP_TOKEN) {
 }
 
 const directory = process.env.OPENCODE_DIRECTORY ?? process.cwd()
+const model = parseModelRef(process.env.OPENCODE_MODEL)
 const client = await makeClient()
 const state = new StateStore()
 
@@ -143,6 +144,11 @@ async function handleUserText(input: Incoming): Promise<void> {
     sessionID = session.id
     state.setByKey(key, sessionID)
     created = true
+    if (model) {
+      await client.session.switchModel({ sessionID, model }).catch((err) => {
+        console.warn(`[opencode-slack-bot] could not switch session ${sessionID} to ${model.providerID}/${model.id}:`, err)
+      })
+    }
   }
 
   try {
@@ -392,4 +398,7 @@ void (async () => {
 })().catch((err) => console.error("[opencode-slack-bot] event stream crashed:", err))
 
 await app.start()
-log(`ready — connected to OpenCode, directory: ${directory}`)
+log(
+  `ready — connected to OpenCode, directory: ${directory}` +
+    (model ? `, model: ${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}` : ", model: location default"),
+)

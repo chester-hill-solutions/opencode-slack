@@ -37,6 +37,27 @@ export interface TextPart {
   text?: string
 }
 
+export interface ModelRef {
+  providerID: string
+  id: string
+  variant?: string
+}
+
+/**
+ * Parse a model reference in `provider/model` or `provider/model#variant`
+ * form. Returns undefined when the string is malformed.
+ */
+export function parseModelRef(ref: string | undefined): ModelRef | undefined {
+  if (!ref) return undefined
+  const [modelPart, variant] = ref.split("#", 2)
+  const slash = modelPart.indexOf("/")
+  if (slash <= 0 || slash === modelPart.length - 1) return undefined
+  const providerID = modelPart.slice(0, slash)
+  const id = modelPart.slice(slash + 1)
+  return variant ? { providerID, id, variant } : { providerID, id }
+}
+
+
 export interface MessageInfo {
   type: string
   id?: string

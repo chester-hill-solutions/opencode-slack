@@ -55,6 +55,8 @@ Requires [Bun](https://bun.sh) ≥ 1.1. By default the bot discovers and starts 
 
 The directory new sessions operate on is `OPENCODE_DIRECTORY` (defaults to the bot's cwd). Session↔thread mappings persist in `~/.local/share/opencode-slack/state.json` (override with `OPENCODE_SLACK_STATE`).
 
+The model for new sessions comes from `OPENCODE_MODEL` (`provider/model` or `provider/model#variant`, e.g. `opencode-go/deepseek-v4.1-flash`); leave it unset to use the location's default model. Existing sessions keep whatever model they were started with.
+
 ## OpenCode plugin
 
 Add to your `opencode.json(c)`:

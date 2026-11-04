@@ -1,0 +1,37 @@
+# Slack app manifest for the OpenCode Slack bot.
+# Create the app at https://api.slack.com/apps → "Create New App" →
+# "From an app manifest", paste this, then install it to your workspace.
+# Docs: https://api.slack.com/reference/app-manifest
+
+display_information:
+  name: OpenCode
+  description: Talk to your OpenCode sessions from Slack
+  background_color: "#1f2430"
+
+features:
+  bot_user:
+    display_name: OpenCode
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read   # see @mentions
+      - chat:write          # post/update messages
+      - channels:history    # follow-ups in public threads
+      - groups:history      # follow-ups in private threads
+      - im:history          # DM messages
+      - reactions:write     # :eyes: acknowledgement
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+  interactivity:
+    is_enabled: true         # permission Approve/Deny buttons
+  socket_mode_enabled: true  # no public Request URL needed
+  org_deploy_enabled: false
+  token_rotation_enabled: false

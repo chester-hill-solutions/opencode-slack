@@ -1,0 +1,17 @@
+{
+  "name": "opencode-slack-plugin",
+  "version": "0.1.0",
+  "description": "OpenCode server plugin that adds Slack tools (post messages, list channels) and opt-in Slack notifications for session completion and permission requests.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@opencode/plugin": "latest",
+    "@slack/web-api": "^7.9.1"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "opencode-slack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Slack integration for OpenCode: an OpenCode server plugin (tools + notifications) and a Slack bot that drives OpenCode sessions from Slack threads.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "bot": "bun run packages/bot/src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}

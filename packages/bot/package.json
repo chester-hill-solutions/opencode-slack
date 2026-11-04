@@ -1,0 +1,17 @@
+{
+  "name": "opencode-slack-bot",
+  "version": "0.1.0",
+  "description": "Slack bot (Socket Mode) that creates and continues OpenCode sessions from Slack mentions and threads, and surfaces permission requests as interactive buttons.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "opencode-slack-bot": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@opencode/client": "latest",
+    "@slack/bolt": "^4.4.0"
+  }
+}

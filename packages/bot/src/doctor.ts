@@ -59,7 +59,7 @@ if (!appToken) {
   fail("SLACK_APP_TOKEN does not look like an app-level token", "expected xapp-…")
 } else {
   try {
-    await new WebClient().apps.connections.open({ token: appToken })
+    await new WebClient(appToken).apps.connections.open()
     ok("SLACK_APP_TOKEN valid", "Socket Mode connection can be opened")
   } catch (err) {
     fail("SLACK_APP_TOKEN rejected", errorCode(err))

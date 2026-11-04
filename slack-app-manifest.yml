@@ -19,7 +19,9 @@ oauth_config:
       - app_mentions:read   # see @mentions
       - chat:write          # post/update messages
       - channels:history    # follow-ups in public threads
+      - channels:read       # list public channels (slack_list_channels, doctor)
       - groups:history      # follow-ups in private threads
+      - groups:read         # list private channels the bot is in
       - im:history          # DM messages
       - reactions:write     # :eyes: acknowledgement
 

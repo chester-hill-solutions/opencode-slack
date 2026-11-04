@@ -53,7 +53,8 @@ Requires [Bun](https://bun.sh) ≥ 1.1. By default the bot discovers and starts 
 - **Threads:** mention the bot *inside* a thread to give that thread its own session; messages in that thread keep using it.
 - **Thread context:** each prompt is wrapped with the Slack thread's messages (or recent channel history for top-level messages), so the agent sees what was being discussed — including messages from before it was mentioned.
 - **DMs:** each DM is one continuous session; `!new` starts a fresh one.
-- **Commands:** `!stop` interrupt · `!new` fresh session · `!leave` stop following a channel · `!status` · `!model` · `!sessions` · `!help`.
+- **Commands:** `!stop` interrupt · `!new` fresh session · `!leave` stop following a channel · `!status` · `!model` · `!sessions` · `!answer` · `!cancel` · `!help`.
+- **Questions:** when the agent asks a question, the bot posts it in the thread with one-tap options (or *Yes/No*). Free-text answers use `!answer <value>`; multi-field questions use `!answer key=value, key=value`; `!cancel` dismisses the question. `!answer` with no argument re-posts whatever is still waiting.
 - **Models:** `!model` lists the enabled models and marks the current one; `!model provider/model` (or `provider/model#variant`) switches this conversation — the session keeps its history.
 - **Sessions:** `!sessions` lists the 10 most recent sessions in this directory with their model and age; `!sessions 2` (or an id / unambiguous id prefix) reattaches the thread to that session instead of starting a new one.
 - **Permissions:** when OpenCode asks to run something sensitive, the bot posts *Approve once / Always allow / Deny* buttons; the decision is recorded in the session.
@@ -156,6 +157,7 @@ opencode-slack/
 │   ├── opencode.ts    # client construction, reply extraction, model refs
 │   ├── conversation.ts # conversation key + reply-thread resolution
 │   ├── commands.ts    # !model / !sessions formatting and selection
+│   ├── forms.ts       # question cards, option buttons, !answer parsing
 │   ├── state.ts       # persisted conversation → session mappings
 │   ├── slackText.ts   # chunking, escaping, Markdown → mrkdwn, check-in/context formatting
 │   └── doctor.ts      # config verification

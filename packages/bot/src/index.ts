@@ -11,6 +11,16 @@ import {
   type ModelSummary,
   type SessionSummary,
 } from "./commands"
+import {
+  answerHint,
+  describeAnswer,
+  describeForm,
+  formButtons,
+  parseFormAnswer,
+  visibleFields,
+  type Form,
+  type FormValue,
+} from "./forms"
 
 /**
  * opencode-slack-bot — Socket Mode Slack app that drives OpenCode.
@@ -69,6 +79,22 @@ interface SessionListRow {
   model?: { providerID: string; id: string; variant?: string }
   time?: { created?: number; updated?: number }
   location?: { directory?: string }
+}
+
+type QuestionForm = Form & { state?: { status?: string } }
+
+/** The oldest question still waiting for an answer in this session, if any. */
+async function nextPendingForm(sessionID: string): Promise<QuestionForm | undefined> {
+  const listed = dataList<Form>(await client.session.form.list({ sessionID }))
+  const first = listed[0]
+  if (!first) return undefined
+  const detail = unwrap(await client.session.form.get({ sessionID, formID: first.id })) as
+    | QuestionForm
+    | undefined
+  if (!detail) return undefined
+  // `list` is not guaranteed to hide answered forms; ask for the authoritative state.
+  if (detail.state?.status && detail.state.status !== "pending") return undefined
+  return detail
 }
 
 interface Incoming {
@@ -151,6 +177,8 @@ async function handleUserText(input: Incoming): Promise<void> {
         "• DMs are one continuous session.",
         "• `!model` — list models; `!model provider/model` switches this conversation's model.",
         "• `!sessions` — list recent sessions; `!sessions 2` switches this conversation to one.",
+        "• `!answer` — show the question OpenCode is waiting on; `!answer <value>` replies to it.",
+        "• `!cancel` — dismiss that question.",
         "• `!stop` — interrupt the running session",
         "• `!new` — start a fresh session",
         "• `!leave` — stop following this channel",
@@ -188,9 +216,14 @@ async function handleUserText(input: Incoming): Promise<void> {
     if (!sessionID) return void (await postChunked(channel, "No session mapped here yet.", replyThreadTs))
     try {
       const session = unwrap(await client.session.get({ sessionID })) as { title?: string } | undefined
+      const questions = dataList<Form>(await client.session.form.list({ sessionID }).catch(() => []))
+      const questionLine =
+        questions.length > 0
+          ? `\nPending question${questions.length === 1 ? "" : `s (${questions.length})`}: \`!answer\` to see it, \`!cancel\` to skip`
+          : ""
       await postChunked(
         channel,
-        `Session \`${sessionID}\`${session?.title ? ` — *${mrkdwnEscape(session.title)}*` : ""}\nDirectory: \`${directory}\``,
+        `Session \`${sessionID}\`${session?.title ? ` — *${mrkdwnEscape(session.title)}*` : ""}\nDirectory: \`${directory}\`${questionLine}`,
         replyThreadTs,
       )
     } catch (err) {
@@ -288,6 +321,65 @@ async function handleUserText(input: Incoming): Promise<void> {
       await postChunked(channel, `🔗 This conversation now continues \`${target.id}\`${title}.`, replyThreadTs)
     } catch (err) {
       await postChunked(channel, `⚠️ Couldn't list sessions: ${errorMessage(err)}`, replyThreadTs)
+    }
+    return
+  }
+
+  if (command === "!answer") {
+    const raw = text.replace(/^!answer\b/i, "").trim()
+    const activeSession = entry?.sessionID
+    if (!activeSession) {
+      await postChunked(channel, "No session here yet — send a message first.", replyThreadTs)
+      return
+    }
+    try {
+      const question = await nextPendingForm(activeSession)
+      if (!question) {
+        await postChunked(channel, "No question is waiting for an answer.", replyThreadTs)
+        return
+      }
+      if (!raw) {
+        await postChunked(channel, [describeForm(question), answerHint(question)].join("\n"), replyThreadTs)
+        return
+      }
+      const parsed = parseFormAnswer(question, raw)
+      if (!parsed.ok) {
+        await postChunked(channel, `⚠️ ${parsed.error}`, replyThreadTs)
+        return
+      }
+      await client.session.form.reply({
+        sessionID: activeSession,
+        formID: question.id,
+        answer: parsed.answer,
+      })
+      const summary = describeAnswer(parsed.answer, visibleFields(question))
+      await postChunked(channel, `✅ Answered${summary ? ` — ${summary}` : ""}.`, replyThreadTs)
+    } catch (err) {
+      await postChunked(channel, `⚠️ Couldn't answer: ${errorMessage(err)}`, replyThreadTs)
+    }
+    return
+  }
+
+  if (command === "!cancel") {
+    const activeSession = entry?.sessionID
+    if (!activeSession) {
+      await postChunked(channel, "No session here yet — send a message first.", replyThreadTs)
+      return
+    }
+    try {
+      const question = await nextPendingForm(activeSession)
+      if (!question) {
+        await postChunked(channel, "No question is waiting to be cancelled.", replyThreadTs)
+        return
+      }
+      await client.session.form.cancel({
+        sessionID: activeSession,
+        formID: question.id,
+        message: "Cancelled from Slack",
+      })
+      await postChunked(channel, `🚫 Cancelled — *${mrkdwnEscape(question.title)}*.`, replyThreadTs)
+    } catch (err) {
+      await postChunked(channel, `⚠️ Couldn't cancel the question: ${errorMessage(err)}`, replyThreadTs)
     }
     return
   }
@@ -440,6 +532,45 @@ const PERMISSION_ACTIONS: Record<string, Decision> = {
 
 registerPermissionHandlers(app, PERMISSION_ACTIONS)
 
+// --- question (form) buttons -------------------------------------------------
+
+const FORM_ANSWER_ACTION = "oc_form_answer"
+
+app.action(FORM_ANSWER_ACTION, async ({ ack, body, action }) => {
+  await ack()
+  const value = (action as { value?: string }).value ?? "{}"
+  let parsed: { sessionID?: string; formID?: string; field?: string; value?: FormValue } = {}
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    /* handled below */
+  }
+  const msg: any = body as any
+  const channel = msg.channel?.id ?? msg.container?.channel_id
+  const messageTs = msg.message?.ts ?? msg.container?.message_ts
+  const user = msg.user?.id ?? msg.user_id
+
+  if (!parsed.sessionID || !parsed.formID || !parsed.field) {
+    await updateButtons(channel, messageTs, "⚠️ Could not parse the answer payload.")
+    return
+  }
+  try {
+    await client.session.form.reply({
+      sessionID: parsed.sessionID,
+      formID: parsed.formID,
+      answer: { [parsed.field]: parsed.value as FormValue },
+    })
+    const shown = Array.isArray(parsed.value) ? parsed.value.join(", ") : String(parsed.value)
+    await updateButtons(
+      channel,
+      messageTs,
+      `✅ Answered${user ? ` by <@${user}>` : ""} — \`${mrkdwnEscape(shown)}\`.`,
+    )
+  } catch (err) {
+    await updateButtons(channel, messageTs, `⚠️ Failed to answer: ${errorMessage(err)}`)
+  }
+})
+
 function registerPermissionHandlers(
   boltApp: App,
   actions: Record<string, Decision>,
@@ -570,11 +701,12 @@ const EVENT_TYPES = [
   "session.execution.failed",
   "session.execution.interrupted",
   "permission.asked",
+  "form.created",
 ]
 
 async function handleEvent(rawEvent: unknown): Promise<void> {
   const event = rawEvent as any
-  const sessionID = event?.data?.sessionID as string | undefined
+  const sessionID = (event?.data?.sessionID ?? event?.data?.form?.sessionID) as string | undefined
   if (!sessionID) return
   const thread = state.getThread(sessionID)
   if (!thread) return // not a Slack-driven session
@@ -661,6 +793,39 @@ async function handleEvent(rawEvent: unknown): Promise<void> {
             ],
           },
         ],
+      })
+      break
+    }
+    case "form.created": {
+      const form = event?.data?.form as Form | undefined
+      if (!form) break
+      const buttons = formButtons(form)
+      const blocks: any[] = [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: `${describeForm(form)}\n${answerHint(form)}` },
+        },
+      ]
+      if (buttons.length > 0) {
+        blocks.push({
+          type: "actions",
+          elements: buttons.map((button) => {
+            const payload = JSON.parse(button.value) as { field: string; value: FormValue }
+            return {
+              type: "button",
+              text: { type: "plain_text", text: button.text },
+              ...(button.style ? { style: button.style } : {}),
+              action_id: FORM_ANSWER_ACTION,
+              value: JSON.stringify({ sessionID, formID: form.id, ...payload }),
+            }
+          }),
+        })
+      }
+      await slack.chat.postMessage({
+        channel: thread.channel,
+        ...(replyThreadTs ? { thread_ts: replyThreadTs } : {}),
+        text: `❓ ${form.title}`,
+        blocks,
       })
       break
     }

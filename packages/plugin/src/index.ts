@@ -85,7 +85,7 @@ export default Plugin.define({
 
   async setup(ctx) {
     const options = (ctx.options ?? {}) as SlackOptions
-    const token = process.env.SLACK_BOT_TOKEN ?? options.botToken
+    const token = (process.env.SLACK_BOT_TOKEN ?? options.botToken)?.trim()
     if (!token) {
       console.warn("[opencode-slack] SLACK_BOT_TOKEN is not set — Slack tools and notifications are disabled.")
       return

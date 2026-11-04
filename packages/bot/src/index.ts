@@ -17,8 +17,8 @@ import { chunkText, mrkdwnEscape } from "./slackText"
  * Deny buttons.
  */
 
-const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN
-const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN?.trim()
+const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN?.trim()
 
 if (!SLACK_BOT_TOKEN || !SLACK_APP_TOKEN) {
   console.error("SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set (see .env.example).")

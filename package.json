@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "bot": "bun run packages/bot/src/index.ts",
+    "doctor": "bun run packages/bot/src/doctor.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

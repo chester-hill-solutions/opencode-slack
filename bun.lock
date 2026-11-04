@@ -18,6 +18,7 @@
       "dependencies": {
         "@opencode/client": "latest",
         "@slack/bolt": "^4.4.0",
+        "@slack/web-api": "^7.19.0",
       },
     },
     "packages/plugin": {

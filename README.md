@@ -26,12 +26,22 @@ Verified against OpenCode 2.2.x: the plugin loads in a real `opencode run` and t
 cp .env.example .env   # fill in SLACK_BOT_TOKEN and SLACK_APP_TOKEN
 ```
 
-### 3. Run the bot
+The bot reads `.env`. If you also load the plugin (see below), give it the same bot token through a separate 0600 file so it never lands in `opencode.json`:
+
+```sh
+printf '%s' 'xoxb-…' > ~/.config/opencode/slack-bot-token
+chmod 600 ~/.config/opencode/slack-bot-token
+```
+
+### 3. Verify and run
 
 ```sh
 bun install
+bun run doctor         # validates both tokens, lists channels, checks OpenCode
 bun run bot            # or: bun run packages/bot/src/index.ts
 ```
+
+`doctor` prints the channel IDs you can use for `notifyChannel` and fails loudly on a bad token or an unreachable OpenCode server.
 
 Requires [Bun](https://bun.sh) ≥ 1.1. By default the bot discovers and starts your **local OpenCode background service** automatically (via `@opencode/client/service`). To talk to a remote server instead, set `OPENCODE_URL` (+ `OPENCODE_TOKEN` or `OPENCODE_AUTH_HEADER`) — see `.env.example`.
 
@@ -64,7 +74,29 @@ Add to your `opencode.json(c)`:
 }
 ```
 
-The bot token is read from `SLACK_BOT_TOKEN` in the OpenCode server's environment (or `"botToken"` in plugin options — prefer the env var). Find channel IDs with the `slack_list_channels` tool or by copying a channel link in Slack (the `C…` segment).
+The bot token is read from `SLACK_BOT_TOKEN` in the OpenCode server's environment, or from `options.botToken`. For a global config, don't paste the token into `opencode.json` — keep it in a 0600 file and use [config variable substitution](https://opencode.ai/v2/docs/config#variables):
+
+```sh
+printf '%s' 'xoxb-…' > ~/.config/opencode/slack-bot-token
+chmod 600 ~/.config/opencode/slack-bot-token
+```
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "/Users/you/WebProjects/opencode-slack/packages/plugin",
+      "options": {
+        "botToken": "{file:~/.config/opencode/slack-bot-token}",
+        "notifyChannel": "C0123ABC",
+        "notifyOn": ["failed"]
+      }
+    }
+  ]
+}
+```
+
+`{env:SLACK_BOT_TOKEN}` works too if the OpenCode server is started with that variable set. Find channel IDs with `bun run doctor` or the `slack_list_channels` tool.
 
 Tools provided to the agent:
 

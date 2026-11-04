@@ -2,6 +2,7 @@ import { App } from "@slack/bolt"
 import { makeClient, latestAssistantReply, parseModelRef, type MessageInfo } from "./opencode"
 import { StateStore } from "./state"
 import { chunkText, formatCheckin, formatSlackContext, markdownToMrkdwn, mrkdwnEscape, type SlackContextMessage } from "./slackText"
+import { conversationKey } from "./conversation"
 
 /**
  * opencode-slack-bot — Socket Mode Slack app that drives OpenCode.
@@ -57,29 +58,6 @@ interface Incoming {
   engageChannel?: boolean
 }
 
-/**
- * Which conversation a message belongs to.
- *
- * Thread sessions win over channel sessions when the thread is mapped. A
- * mention in a new thread prefers a fresh thread session. Everything else in
- * an engaged channel falls back to the channel session.
- */
-function conversationKey(input: Incoming): { key: string; replyThreadTs?: string } {
-  if (input.isDm) return { key: `${input.channel}:dm` } // no threading in DMs
-
-  const threadKey = input.threadTs ? `${input.channel}:${input.threadTs}` : undefined
-  if (threadKey && (input.engageChannel || state.getByKey(threadKey))) {
-    return { key: threadKey, replyThreadTs: input.threadTs }
-  }
-
-  const channelKey = `${input.channel}:channel`
-  const channelEntry = state.getByKey(channelKey)
-  if (channelEntry) return { key: channelKey, replyThreadTs: channelEntry.replyTs }
-
-  if (threadKey) return { key: threadKey, replyThreadTs: input.threadTs }
-  return { key: channelKey, replyThreadTs: input.ts }
-}
-
 /** Slack thread (or recent channel history) rendered for the agent. */
 async function fetchContextMessages(input: Incoming): Promise<SlackContextMessage[]> {
   try {
@@ -129,7 +107,7 @@ async function postChunked(channel: string, text: string, threadTs?: string): Pr
 
 async function handleUserText(input: Incoming): Promise<void> {
   const { channel } = input
-  const { key, replyThreadTs: initialReplyTs } = conversationKey(input)
+  const { key, replyThreadTs: initialReplyTs } = conversationKey(input, (key) => state.getByKey(key))
   const entry = state.getByKey(key)
   const replyThreadTs = entry?.replyTs ?? initialReplyTs
   const text = stripMention(input.text)
@@ -222,6 +200,13 @@ async function handleUserText(input: Incoming): Promise<void> {
   if (!input.isDm && !state.getByKey(`${channel}:channel`)) {
     state.setByKey(`${channel}:channel`, sessionID, replyThreadTs)
   }
+
+  // Point the session's reply target at the conversation that is driving it
+  // right now. One session can be engaged from several threads (a channel
+  // session is reused by any thread that has no session of its own), and the
+  // event stream only carries the session ID, so without this refresh the
+  // reply lands in whichever thread was engaged first.
+  state.setByKey(key, sessionID, replyThreadTs)
 
   const prompt = await buildPromptText(input, text)
   try {

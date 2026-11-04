@@ -47,9 +47,11 @@ Requires [Bun](https://bun.sh) ≥ 1.1. By default the bot discovers and starts 
 
 ### 4. Use it
 
-- **Channels:** invite the bot (`/invite @OpenCode`), then `@OpenCode refactor the auth middleware`. The mention roots a thread; every later reply in that thread continues the same session — no mention needed.
+- **Channels:** invite the bot (`/invite @OpenCode`), then `@OpenCode refactor the auth middleware`. The mention engages the channel: from then on **every message in the channel** feeds the same session — no mention needed, in a thread or not. Replies stay in the mention's thread.
+- Mention the bot *inside a thread* to give that thread its own session; messages in that thread keep using it.
+- Each prompt carries the Slack **thread context** (or recent channel history for top-level messages), so the agent can see what was being discussed, including messages from before it was mentioned.
 - **DMs:** each DM is one continuous session. `!new` starts a fresh one.
-- **Commands (in-thread or DM):** `!stop` interrupt, `!new` fresh session, `!status`, `!help`.
+- **Commands (in-thread or DM):** `!stop` interrupt, `!new` fresh session, `!leave` stop following a channel, `!status`, `!help`.
 - **Permissions:** when OpenCode asks to run something sensitive, the bot posts *Approve once / Always allow / Deny* buttons. The decision is recorded in the session.
 - Replies appear when the session finishes (live event stream; if the bot is down during a run, that reply is missed).
 - While a session runs, the bot keeps **one** message in the thread updated (`⏳ OpenCode working — 7 steps · 1m 20s · last tool: bash`) every `OPENCODE_SLACK_CHECKIN_SECONDS` (default 45), then deletes it when the reply lands.

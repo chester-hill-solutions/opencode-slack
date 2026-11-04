@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt"
 import { makeClient, latestAssistantReply, parseModelRef, type MessageInfo } from "./opencode"
 import { StateStore } from "./state"
-import { chunkText, formatCheckin, mrkdwnEscape } from "./slackText"
+import { chunkText, formatCheckin, formatSlackContext, mrkdwnEscape, type SlackContextMessage } from "./slackText"
 
 /**
  * opencode-slack-bot — Socket Mode Slack app that drives OpenCode.
@@ -53,12 +53,68 @@ interface Incoming {
   isDm: boolean
   text: string
   user?: string
+  /** A mention: engage the whole channel, not just this thread. */
+  engageChannel?: boolean
 }
 
+/**
+ * Which conversation a message belongs to.
+ *
+ * Thread sessions win over channel sessions when the thread is mapped. A
+ * mention in a new thread prefers a fresh thread session. Everything else in
+ * an engaged channel falls back to the channel session.
+ */
 function conversationKey(input: Incoming): { key: string; replyThreadTs?: string } {
   if (input.isDm) return { key: `${input.channel}:dm` } // no threading in DMs
-  const root = input.threadTs ?? input.ts
-  return { key: `${input.channel}:${root}`, replyThreadTs: root }
+
+  const threadKey = input.threadTs ? `${input.channel}:${input.threadTs}` : undefined
+  if (threadKey && (input.engageChannel || state.getByKey(threadKey))) {
+    return { key: threadKey, replyThreadTs: input.threadTs }
+  }
+
+  const channelKey = `${input.channel}:channel`
+  const channelEntry = state.getByKey(channelKey)
+  if (channelEntry) return { key: channelKey, replyThreadTs: channelEntry.replyTs }
+
+  if (threadKey) return { key: threadKey, replyThreadTs: input.threadTs }
+  return { key: channelKey, replyThreadTs: input.ts }
+}
+
+/** Slack thread (or recent channel history) rendered for the agent. */
+async function fetchContextMessages(input: Incoming): Promise<SlackContextMessage[]> {
+  try {
+    if (input.threadTs) {
+      const res = await slack.conversations.replies({ channel: input.channel, ts: input.threadTs, limit: 60 })
+      return (res.messages ?? []) as SlackContextMessage[]
+    }
+    const res = await slack.conversations.history({
+      channel: input.channel,
+      latest: input.ts,
+      inclusive: false,
+      limit: 20,
+    })
+    return ((res.messages ?? []) as SlackContextMessage[]).reverse()
+  } catch (err) {
+    console.warn("[opencode-slack-bot] could not fetch Slack context:", err)
+    return []
+  }
+}
+
+async function buildPromptText(input: Incoming, text: string): Promise<string> {
+  if (input.isDm) return text // the DM history is already the session
+  const messages = await fetchContextMessages(input)
+  const context = formatSlackContext(messages, { botUserId, excludeTs: input.ts })
+  if (!context) return text
+  const source = input.threadTs ? `thread ${input.threadTs}` : "recent channel history"
+  return [
+    `<slack_context channel="${input.channel}" source="${source}">`,
+    context,
+    "</slack_context>",
+    "",
+    "<message>",
+    text,
+    "</message>",
+  ].join("\n")
 }
 
 function stripMention(text: string): string {
@@ -73,7 +129,9 @@ async function postChunked(channel: string, text: string, threadTs?: string): Pr
 
 async function handleUserText(input: Incoming): Promise<void> {
   const { channel } = input
-  const { key, replyThreadTs } = conversationKey(input)
+  const { key, replyThreadTs: initialReplyTs } = conversationKey(input)
+  const entry = state.getByKey(key)
+  const replyThreadTs = entry?.replyTs ?? initialReplyTs
   const text = stripMention(input.text)
 
   const [command] = text.split(/\s+/)
@@ -84,10 +142,12 @@ async function handleUserText(input: Incoming): Promise<void> {
       channel,
       [
         "*OpenCode Slack bot*",
-        "• Mention me (or DM me) to start an OpenCode session.",
-        "• Reply in the thread to continue it — no mention needed.",
+        "• Mention me to start a session. I then follow this channel — every message feeds the same session, with thread context.",
+        "• In a thread, mention me to give that thread its own session.",
+        "• DMs are one continuous session.",
         "• `!stop` — interrupt the running session",
         "• `!new` — start a fresh session",
+        "• `!leave` — stop following this channel",
         "• `!status` — show the mapped session",
         "• Permission requests arrive as buttons: *Approve once*, *Always allow*, *Deny*.",
       ].join("\n"),
@@ -97,7 +157,7 @@ async function handleUserText(input: Incoming): Promise<void> {
   }
 
   if (command === "!stop") {
-    const sessionID = state.getByKey(key)
+    const sessionID = entry?.sessionID
     if (!sessionID) return void (await postChunked(channel, "No session mapped here yet.", replyThreadTs))
     await client.session.interrupt({ sessionID, resume: false })
     await postChunked(channel, "⏹️ Interrupted.", replyThreadTs)
@@ -110,8 +170,15 @@ async function handleUserText(input: Incoming): Promise<void> {
     return
   }
 
+  if (command === "!leave") {
+    if (input.isDm) return void (await postChunked(channel, "I'm not following a channel here — just say `!new` for a fresh session.", replyThreadTs))
+    state.removeByKey(`${channel}:channel`)
+    await postChunked(channel, "👋 Not following this channel any more — mention me to re-engage.", replyThreadTs)
+    return
+  }
+
   if (command === "!status") {
-    const sessionID = state.getByKey(key)
+    const sessionID = entry?.sessionID
     if (!sessionID) return void (await postChunked(channel, "No session mapped here yet.", replyThreadTs))
     try {
       const session = unwrap(await client.session.get({ sessionID })) as { title?: string } | undefined
@@ -132,7 +199,7 @@ async function handleUserText(input: Incoming): Promise<void> {
     return
   }
 
-  let sessionID = state.getByKey(key)
+  let sessionID = entry?.sessionID
   let created = false
   if (!sessionID) {
     const session = unwrap(
@@ -142,7 +209,7 @@ async function handleUserText(input: Incoming): Promise<void> {
       }),
     ) as { id: string }
     sessionID = session.id
-    state.setByKey(key, sessionID)
+    state.setByKey(key, sessionID, initialReplyTs)
     created = true
     if (model) {
       await client.session.switchModel({ sessionID, model }).catch((err) => {
@@ -151,8 +218,14 @@ async function handleUserText(input: Incoming): Promise<void> {
     }
   }
 
+  // A mention in a channel engages the channel: later messages keep using this session.
+  if (!input.isDm && !state.getByKey(`${channel}:channel`)) {
+    state.setByKey(`${channel}:channel`, sessionID, replyThreadTs)
+  }
+
+  const prompt = await buildPromptText(input, text)
   try {
-    await client.session.prompt({ sessionID, text })
+    await client.session.prompt({ sessionID, text: prompt })
   } catch (err) {
     await postChunked(channel, `⚠️ Couldn't deliver the prompt: ${errorMessage(err)}`, replyThreadTs)
     return
@@ -201,6 +274,7 @@ app.event("app_mention", async ({ event }) => {
       ts: ev.ts,
       isDm: false,
       text: ev.text ?? "",
+      engageChannel: true,
       ...(ev.thread_ts ? { threadTs: ev.thread_ts } : {}),
       ...(ev.user ? { user: ev.user } : {}),
     }
@@ -227,9 +301,10 @@ app.event("message", async ({ event }) => {
   const threadTs = typeof ev.thread_ts === "string" ? ev.thread_ts : undefined
 
   if (!isDm) {
-    // Channel message: only forward if it lands in a thread we mapped.
-    if (!threadTs) return
-    if (!state.getByKey(`${channel}:${threadTs}`)) return
+    // Follow mapped threads, and any message in a channel we've been mentioned in.
+    const inMappedThread = threadTs ? state.getByKey(`${channel}:${threadTs}`) : undefined
+    const channelEngaged = state.getByKey(`${channel}:channel`)
+    if (!inMappedThread && !channelEngaged) return
   }
 
   const input: Incoming = {
@@ -397,8 +472,7 @@ async function handleEvent(rawEvent: unknown): Promise<void> {
   if (!sessionID) return
   const thread = state.getThread(sessionID)
   if (!thread) return // not a Slack-driven session
-  const isDm = thread.threadTs === "dm"
-  const replyThreadTs = isDm ? undefined : thread.threadTs
+  const replyThreadTs = thread.replyTs
 
   switch (event.type) {
     case "session.step.started": {

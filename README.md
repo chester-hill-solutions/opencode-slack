@@ -120,6 +120,9 @@ Tools provided to the agent:
 
 - `slack_post_message` — post to a channel (or thread via `thread_ts`); long messages are split automatically.
 - `slack_list_channels` — list channels the bot can see, with IDs.
+- `slack_upload_file` — upload a local file (video clip, image, audio, document) to a channel or thread; returns the Slack file ID. Requires the `files:write` scope, which the manifest already requests.
+
+The clip pipeline uses `slack_upload_file`: render clips locally, then upload them with a title and an `initial_comment` so the thread reads like a post, not a file dump.
 
 Notifications are **off** unless `notifyChannel` is set. If you run the bot, `notifyOn: ["failed"]` is usually enough — the bot already posts interactive permission buttons.
 

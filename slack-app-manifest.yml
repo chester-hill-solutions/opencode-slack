@@ -24,6 +24,8 @@ oauth_config:
       - groups:read         # list private channels the bot is in
       - im:history          # DM messages
       - reactions:write     # :eyes: acknowledgement
+      - files:write         # upload clips, images and documents (slack_upload_file)
+      - files:write         # upload video clips (debate clip pipeline, arfin-test)
 
 settings:
   event_subscriptions:

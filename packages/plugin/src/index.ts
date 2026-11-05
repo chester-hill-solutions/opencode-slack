@@ -1,3 +1,5 @@
+import { createReadStream, existsSync, statSync } from "node:fs"
+import { basename } from "node:path"
 import { Plugin } from "@opencode/plugin"
 import { WebClient } from "@slack/web-api"
 
@@ -7,8 +9,9 @@ import { WebClient } from "@slack/web-api"
  * Two capabilities, both driven by the SLACK_BOT_TOKEN env var (or the
  * `botToken` plugin option):
  *
- * 1. Tools — `slack_post_message` and `slack_list_channels`, so the agent can
- *    post to Slack from inside a session.
+ * 1. Tools — `slack_post_message`, `slack_list_channels` and
+ *    `slack_upload_file`, so the agent can post to Slack and upload clips or
+ *    documents from inside a session.
  * 2. Notifications (opt-in) — posts to `notifyChannel` when a session
  *    finishes, fails, is interrupted, or asks for permission.
  *
@@ -153,6 +156,63 @@ export default Plugin.define({
           })
           const channels = (res.channels ?? []).map((c) => ({ id: c.id, name: c.name, is_private: c.is_private }))
           return { content: JSON.stringify(channels, null, 2) }
+        },
+      })
+
+      editor.add({
+        name: "upload_file",
+        description:
+          "Upload a local file (video clip, image, audio, document) to a Slack channel, optionally into a thread. Requires the files:write scope.",
+        input: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute path to the file to upload." },
+            channel: {
+              type: "string",
+              description: "Channel ID, e.g. C0123ABC. Use slack_list_channels to resolve names to IDs.",
+            },
+            title: { type: "string", description: "Title shown for the file (defaults to the filename)." },
+            comment: { type: "string", description: "Message posted alongside the file." },
+            thread_ts: {
+              type: "string",
+              description: "Optional thread timestamp to upload into an existing thread.",
+            },
+          },
+          required: ["path", "channel"],
+          additionalProperties: false,
+        },
+        options: { namespace: "slack", codemode: true },
+        execute: async (input) => {
+          const { path, channel, title, comment, thread_ts } = input as {
+            path: string
+            channel: string
+            title?: string
+            comment?: string
+            thread_ts?: string
+          }
+          if (!existsSync(path)) throw new Error(`file not found: ${path}`)
+          const stat = statSync(path)
+          if (!stat.isFile()) throw new Error(`not a file: ${path}`)
+
+          const filename = basename(path)
+          const args = {
+            channel_id: channel,
+            file: createReadStream(path),
+            filename,
+            title: title ?? filename,
+            ...(comment ? { initial_comment: comment } : {}),
+            ...(thread_ts ? { thread_ts } : {}),
+          } as Parameters<InstanceType<typeof WebClient>["files"]["uploadV2"]>[0]
+          const res = await slack.files.uploadV2(args)
+          // uploadV2 returns one completeUploadExternal response per file group.
+          const first = (Array.isArray(res) ? res[0] : res) as {
+            files?: Array<{ id?: string }>
+            file?: { id?: string }
+          }
+          const fileId = first?.files?.[0]?.id ?? first?.file?.id
+          return {
+            content: `Uploaded ${filename} (${stat.size} bytes) to ${channel}${thread_ts ? ` (thread ${thread_ts})` : ""}.${fileId ? ` file id: ${fileId}` : ""}`,
+          }
         },
       })
     })

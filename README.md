@@ -132,6 +132,10 @@ The plugin isn't published to npm; load it by path (or `bun link` it).
 
 Any always-on host works — it's an outbound Socket Mode connection, so there are no inbound ports. For Railway, create a service from this repo, set the env vars from `.env.example` (`OPENCODE_URL` pointing at your OpenCode server, `OPENCODE_AUTH_HEADER=Basic …` if it's behind Caddy basic auth, `OPENCODE_DIRECTORY=/data/project` on a mounted volume), and run `bun run bot`.
 
+### Cloudflare Workers
+
+There is also a Workers + Durable Objects + Containers runtime under [`workers/`](workers/). It deploys through **Workers Builds**, so Cloudflare builds the container image server-side — no local Docker. See [workers/README.md](workers/README.md) for setup, the Workers Builds configuration, and the Socket Mode → Events API cutover.
+
 ## Security
 
 - The bot acts with **your** OpenCode permissions in `OPENCODE_DIRECTORY`. Anyone who can talk to it in Slack can drive that session — restrict the channel, and give Slack-driven work a dedicated OpenCode instance with tight [permissions](https://opencode.ai/v2/docs/permissions). The Approve/Deny buttons exist to keep a human in the loop.

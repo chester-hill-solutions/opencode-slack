@@ -64,3 +64,16 @@ export function conversationKey(
   if (threadKey) return { key: threadKey, replyThreadTs: input.threadTs }
   return { key: channelKey, replyThreadTs: input.ts }
 }
+
+/**
+ * Pick the reply thread for a message.
+ *
+ * The freshly resolved target always wins: it was computed from the message
+ * actually being answered. The stored one is only a fallback for callers that
+ * have no message context. Preferring the stored value is what kept replying
+ * into the thread a channel was first engaged from, regardless of where the
+ * user had written.
+ */
+export function replyTarget(resolved: string | undefined, stored: string | undefined): string | undefined {
+  return resolved ?? stored
+}

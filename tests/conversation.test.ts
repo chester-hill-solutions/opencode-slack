@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { conversationKey, type ConversationEntry } from "../packages/bot/src/conversation"
+import { conversationKey, replyTarget, type ConversationEntry } from "../packages/bot/src/conversation"
 
 const store = (entries: Record<string, ConversationEntry>) => (key: string) => entries[key]
 
@@ -56,5 +56,18 @@ describe("conversationKey", () => {
       key: thread("C1", "2"),
       replyThreadTs: "2",
     })
+  })
+})
+
+describe("replyTarget", () => {
+  test("the freshly resolved target wins over the stored one", () => {
+    // The regression: a message in thread 7 while the channel entry still says
+    // thread 1 must reply to 7.
+    expect(replyTarget("7", "1")).toBe("7")
+  })
+
+  test("falls back to the stored target only when nothing was resolved", () => {
+    expect(replyTarget(undefined, "1")).toBe("1")
+    expect(replyTarget(undefined, undefined)).toBeUndefined()
   })
 })

@@ -2,7 +2,7 @@ import { App } from "@slack/bolt"
 import { makeClient, latestAssistantReply, parseModelRef, type MessageInfo } from "./opencode"
 import { StateStore } from "./state"
 import { chunkText, formatCheckin, formatSlackContext, markdownToMrkdwn, mrkdwnEscape, type SlackContextMessage } from "./slackText"
-import { conversationKey } from "./conversation"
+import { conversationKey, replyTarget } from "./conversation"
 import {
   formatModelList,
   formatSessionList,
@@ -161,7 +161,10 @@ async function handleUserText(input: Incoming): Promise<void> {
   const { channel } = input
   const { key, replyThreadTs: initialReplyTs } = conversationKey(input, (key) => state.getByKey(key))
   const entry = state.getByKey(key)
-  const replyThreadTs = entry?.replyTs ?? initialReplyTs
+  // The resolved target comes from the message being answered; the stored one
+  // is only a fallback. Preferring the stored value threw away the fresh target
+  // and kept posting into the original engagement thread.
+  const replyThreadTs = replyTarget(initialReplyTs, entry?.replyTs)
   const text = stripMention(input.text)
 
   const [command] = text.split(/\s+/)

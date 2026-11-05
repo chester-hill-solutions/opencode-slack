@@ -37,9 +37,10 @@ export interface ConversationKey {
  * - An engaged channel shares one conversation across its messages.
  * - Anything else starts with the channel (or the thread it arrived in).
  *
- * The reply target is always **the thread the message arrived in**. Falling
- * back to the thread a channel was first engaged from is what used to post
- * replies into a thread the user was not looking at.
+ * The reply target is always **the thread the message arrived in** — for a
+ * top-level message, a thread rooted at that message. Falling back to the
+ * thread a channel was first engaged from is what posted replies into a thread
+ * the user was not looking at.
  */
 export function conversationKey(
   input: ConversationInput,
@@ -53,11 +54,11 @@ export function conversationKey(
   }
 
   const channelKey = `${input.channel}:channel`
-  const channelEntry = lookup(channelKey)
-  if (channelEntry) {
-    // A threaded message joins the engaged channel's conversation, but its
-    // reply belongs in this thread, not in the one that engaged the channel.
-    return { key: channelKey, replyThreadTs: input.threadTs ?? channelEntry.replyTs ?? input.ts }
+  if (lookup(channelKey)) {
+    // A thread message joins the engaged channel's conversation and replies in
+    // that thread; a top-level message gets a fresh reply thread under itself.
+    // Never the engagement thread: that is a different conversation surface.
+    return { key: channelKey, replyThreadTs: input.threadTs ?? input.ts }
   }
 
   if (threadKey) return { key: threadKey, replyThreadTs: input.threadTs }

@@ -31,11 +31,13 @@ describe("conversationKey", () => {
     })
   })
 
-  test("an engaged channel answers top-level messages in its engagement thread", () => {
+  test("an engaged channel answers a top-level message in a new thread under it", () => {
+    // The channel was engaged from thread 1. A fresh top-level message (ts 9)
+    // must be answered under ts 9, not inside thread 1.
     const entries = { "C1:channel": { replyTs: "1" } }
     expect(conversationKey({ channel: "C1", ts: "9", isDm: false }, store(entries))).toEqual({
       key: "C1:channel",
-      replyThreadTs: "1",
+      replyThreadTs: "9",
     })
   })
 

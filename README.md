@@ -49,7 +49,7 @@ Requires [Bun](https://bun.sh) ≥ 1.1. By default the bot discovers and starts 
 
 ### 4. Use it
 
-- **Channels:** invite the bot (`/invite @OpenCode`), then `@OpenCode refactor the auth middleware`. The mention **engages the channel**: from then on every human message in the channel feeds the same session — no mention needed, top-level or in any thread. Replies land in the thread the message was sent in.
+- **Channels:** invite the bot (`/invite @OpenCode`), then `@OpenCode refactor the auth middleware`. The mention **engages the channel**: from then on every human message in the channel feeds the same session — no mention needed, top-level or in any thread. Replies land in the thread the message was sent in; a top-level message gets a reply thread under itself.
 - **Threads:** mention the bot *inside* a thread to give that thread its own session; messages in that thread keep using it.
 - **Thread context:** each prompt is wrapped with the Slack thread's messages (or recent channel history for top-level messages), so the agent sees what was being discussed — including messages from before it was mentioned.
 - **DMs:** each DM is one continuous session; `!new` starts a fresh one.

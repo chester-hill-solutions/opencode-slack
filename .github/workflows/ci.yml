@@ -14,5 +14,11 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      - working-directory: workers
+        run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
+      - working-directory: workers
+        run: bun run typecheck
+      - working-directory: workers
+        run: bun test

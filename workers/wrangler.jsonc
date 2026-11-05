@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "opencode-slack-workers",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": {
+    "WORKSPACE_REPO": "https://github.com/chester-hill-solutions/opencode-slack",
+    "OPENCODE_MODEL": "opencode/deepseek-v4.1-flash",
+    "CHECKIN_SECONDS": "45"
+  },
+  "containers": [
+    {
+      "class_name": "ThreadContainer",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "class_name": "ThreadContainer", "name": "THREAD" }]
+  },
+  "r2_buckets": [{ "binding": "CHECKPOINTS", "bucket_name": "opencode-slack-checkpoints" }],
+  "exports": {
+    "ThreadContainer": { "type": "durable-object", "storage": "sqlite" }
+  }
+}

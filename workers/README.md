@@ -1,7 +1,7 @@
 # Workers runtime (scaffold)
 
-Cloudflare Workers + Durable Objects + Containers version of the Slack bot, with
-OpenCode running in a container and workspaces checkpointed to R2.
+Cloudflare Workers + Durable Objects + Containers runtime for OpenCode. Slack is
+one adapter; HTTP/SSE clients are another. Workspaces checkpoint to R2.
 
 > **Status:** scaffold. Worker/DO logic and tests are in place; the wrangler
 > config validates. The image has not been built or run end to end yet. The reply
@@ -10,13 +10,15 @@ OpenCode running in a container and workspaces checkpointed to R2.
 ## Shape
 
 ```
-Slack ──POST /slack/events──────► Worker (verify signature, url_verification, ack)
-                                     └─► ThreadContainer DO (one per thread)
-                                           ├─ SQLite state (session, reply target, dedupe, pending permissions)
-                                           ├─ :4001 control server (status/restore/start/checkpoint)
-                                           ├─ :4000 opencode serve, cwd /workspace
-                                           ├─ R2 CHECKPOINTS bucket (tar.gz of the workspace)
-                                           └─ alarm pump → session.context → Slack reply
+Slack ──POST /slack/events────────┐
+HTTP/SSE ──/api/conversations/:key┤
+                                   ▼
+                        Conversation DO (one per conversation)
+                          ├─ SQLite state (session, Slack target, dedupe, pending permissions)
+                          ├─ :4001 control server (status/restore/start/checkpoint)
+                          ├─ :4000 opencode serve, cwd /workspace
+                          ├─ R2 CHECKPOINTS bucket (tar.gz of the workspace)
+                          └─ alarm pump → SSE subscribers + Slack delivery
 ```
 
 - The container class **is** the Durable Object; it reaches the container with
@@ -29,6 +31,48 @@ Slack ──POST /slack/events──────► Worker (verify signature, ur
 - Permissions: "smart allow" rules are written into the container's OpenCode
   config (`entrypoint.sh`); dangerous commands are denied, everything else asks.
 
+## HTTP/SSE adapter
+
+Any client with the API token can drive a conversation. The DO emits events to
+every SSE subscriber; a conversation that also has a Slack target posts there too.
+
+```sh
+# start a turn
+curl -X POST https://<worker>/api/conversations/web:demo/messages \
+  -H "authorization: Bearer $API_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"text":"what does this repo do?"}'
+
+# stream events (assistant, settled, permission, error)
+curl -N https://<worker>/api/conversations/web:demo/events \
+  -H "authorization: Bearer $API_TOKEN"
+
+# answer a permission request
+curl -X POST https://<worker>/api/conversations/web:demo/permissions/<requestID> \
+  -H "authorization: Bearer $API_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"decision":"once"}'
+
+# inspect state
+curl https://<worker>/api/conversations/web:demo -H "authorization: Bearer $API_TOKEN"
+```
+
+Event frames look like:
+
+```
+event: assistant
+data: {"type":"assistant","text":"..."}
+
+event: permission
+data: {"type":"permission","requestID":"req_1","action":"shell","resources":["ls"]}
+
+event: settled
+data: {"type":"settled"}
+```
+
+Set `API_TOKEN` with `bunx wrangler secret put API_TOKEN`. Without it the API
+routes return 503.
+
 ## Deploy with Workers Builds (no local Docker)
 
 Cloudflare builds the image in the Workers Builds environment. One-time setup:
@@ -38,7 +82,7 @@ Cloudflare builds the image in the Workers Builds environment. One-time setup:
    - Root directory: `workers`
    - Build command: `bun install`
    - Deploy command: `npx wrangler deploy`
-3. Add secrets: `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`, `SLACK_BOT_USER_ID`.
+3. Add secrets: `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`, `SLACK_BOT_USER_ID`, `API_TOKEN`.
 4. Create the R2 bucket: `bunx wrangler r2 bucket create opencode-slack-checkpoints`
    (or in the dashboard).
 5. Push to `main` → Workers Builds builds the image, publishes it, and rolls out
@@ -86,6 +130,8 @@ Rollback: re-enable Socket Mode and restart the launchd bot.
 ## Known gaps
 
 - Warm-stream half of the hybrid reply pump (polling only today).
+- SSE has no replay (`Last-Event-ID`) and no heartbeat between polls; a dropped
+  client must reconnect and refetch state.
 - Channel engagement (`!leave`, channel-level sessions) not ported.
 - Check-in messages and permission buttons are wired but untested against a live container.
 - Stow: the image carries `stow-s3`, but the workspace is currently a tar checkpoint;

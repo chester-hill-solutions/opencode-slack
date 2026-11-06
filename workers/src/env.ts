@@ -3,11 +3,13 @@ export interface Env {
   SLACK_BOT_TOKEN: string
   /** Bot user id, used to strip mentions and skip our own messages. */
   SLACK_BOT_USER_ID?: string
-  THREAD: DurableObjectNamespace
+  CONVERSATION: DurableObjectNamespace
   WORKSPACE_REPO: string
   OPENCODE_MODEL: string
   CHECKIN_SECONDS: string
   CHECKPOINTS: R2Bucket
+  /** Bearer token for the HTTP/SSE adapter. */
+  API_TOKEN?: string
 }
 
 /** Model reference in provider/model[#variant] form. */

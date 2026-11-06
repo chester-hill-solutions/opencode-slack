@@ -12,17 +12,17 @@
   },
   "containers": [
     {
-      "class_name": "ThreadContainer",
+      "class_name": "Conversation",
       "image": "./Dockerfile",
       "instance_type": "lite",
       "max_instances": 1
     }
   ],
   "durable_objects": {
-    "bindings": [{ "class_name": "ThreadContainer", "name": "THREAD" }]
+    "bindings": [{ "class_name": "Conversation", "name": "CONVERSATION" }]
   },
   "r2_buckets": [{ "binding": "CHECKPOINTS", "bucket_name": "opencode-slack-checkpoints" }],
   "exports": {
-    "ThreadContainer": { "type": "durable-object", "storage": "sqlite" }
+    "Conversation": { "type": "durable-object", "storage": "sqlite" }
   }
 }

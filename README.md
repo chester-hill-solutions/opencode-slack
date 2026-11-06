@@ -134,7 +134,7 @@ Any always-on host works — it's an outbound Socket Mode connection, so there a
 
 ### Cloudflare Workers
 
-There is also a Workers + Durable Objects + Containers runtime under [`workers/`](workers/). It deploys through **Workers Builds**, so Cloudflare builds the container image server-side — no local Docker. See [workers/README.md](workers/README.md) for setup, the Workers Builds configuration, and the Socket Mode → Events API cutover.
+There is also a Workers + Durable Objects + Containers runtime under [`workers/`](workers/). Conversations are transport-neutral: Slack is one adapter, HTTP/SSE is another, and both share the same Durable Object. It deploys through **Workers Builds**, so Cloudflare builds the container image server-side — no local Docker. See [workers/README.md](workers/README.md) for setup, the Workers Builds configuration, the HTTP/SSE API, and the Socket Mode → Events API cutover.
 
 ## Security
 

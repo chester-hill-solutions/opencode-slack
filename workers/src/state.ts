@@ -1,14 +1,21 @@
 /**
- * Per-thread state, stored in the Durable Object's SQLite-backed storage.
- * Kept behind a tiny interface so it can be tested with a fake storage.
+ * Per-conversation state, stored in the Durable Object's SQLite-backed storage.
+ * Transport-neutral: Slack targets and HTTP/SSE consumers share it.
  */
 
-export interface ThreadState {
-  sessionID?: string
-  channel?: string
+export type Transport = "slack" | "http"
+
+export interface SlackTarget {
+  channel: string
   /** Thread root replies are posted under. Absent for DMs. */
   replyTs?: string
-  /** Last assistant text posted for the current run. */
+}
+
+export interface ConversationState {
+  sessionID?: string
+  transport?: Transport
+  slack?: SlackTarget
+  /** Last assistant text delivered, used to avoid duplicates. */
   lastReply?: string
   /** Slack event ids already handled (dedupe). */
   seen: string[]
@@ -23,15 +30,15 @@ export interface KeyValueStorage {
 
 const SEEN_LIMIT = 200
 
-export class ThreadStore {
+export class ConversationStore {
   constructor(private readonly storage: KeyValueStorage) {}
 
-  async get(): Promise<ThreadState> {
-    const state = await this.storage.get<ThreadState>("state")
+  async get(): Promise<ConversationState> {
+    const state = await this.storage.get<ConversationState>("state")
     return state ?? { seen: [], pending: {} }
   }
 
-  async save(state: ThreadState): Promise<void> {
+  async save(state: ConversationState): Promise<void> {
     await this.storage.put("state", state)
   }
 
@@ -44,11 +51,11 @@ export class ThreadStore {
     return false
   }
 
-  async setSession(sessionID: string, channel: string, replyTs?: string): Promise<void> {
+  async setSession(sessionID: string, transport: Transport, slack?: SlackTarget): Promise<void> {
     const state = await this.get()
     state.sessionID = sessionID
-    state.channel = channel
-    if (replyTs) state.replyTs = replyTs
+    state.transport = transport
+    if (slack) state.slack = slack
     await this.save(state)
   }
 

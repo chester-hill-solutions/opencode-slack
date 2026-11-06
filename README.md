@@ -132,9 +132,9 @@ The plugin isn't published to npm; load it by path (or `bun link` it).
 
 Any always-on host works — it's an outbound Socket Mode connection, so there are no inbound ports. For Railway, create a service from this repo, set the env vars from `.env.example` (`OPENCODE_URL` pointing at your OpenCode server, `OPENCODE_AUTH_HEADER=Basic …` if it's behind Caddy basic auth, `OPENCODE_DIRECTORY=/data/project` on a mounted volume), and run `bun run bot`.
 
-### Cloudflare Workers
+### Cloudflare harness
 
-There is also a Workers + Durable Objects + Containers runtime under [`workers/`](workers/). Conversations are transport-neutral: Slack is one adapter, HTTP/SSE is another, and both share the same Durable Object. It deploys through **Workers Builds**, so Cloudflare builds the container image server-side — no local Docker. See [workers/README.md](workers/README.md) for setup, the Workers Builds configuration, the HTTP/SSE API, and the Socket Mode → Events API cutover.
+The Workers + Durable Objects + Containers runtime now lives in its own repo: [**chester-hill-solutions/opencode-harness**](https://github.com/chester-hill-solutions/opencode-harness). It is a transport-neutral harness — one Durable Object per conversation, local S3 (stow-s3) for the hot workspace, R2 for cold checkpoints, and an HTTP/SSE core. Slack is one adapter; the bot in this repo remains the local Socket Mode bot.
 
 ## Security
 

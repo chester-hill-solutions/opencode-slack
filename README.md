@@ -134,7 +134,7 @@ Any always-on host works — it's an outbound Socket Mode connection, so there a
 
 ### Cloudflare harness
 
-The Workers + Durable Objects + Containers runtime now lives in its own repo: [**chester-hill-solutions/opencode-harness**](https://github.com/chester-hill-solutions/opencode-harness). It is a transport-neutral harness — one Durable Object per conversation, local S3 (stow-s3) for the hot workspace, R2 for cold checkpoints, and an HTTP/SSE core. Slack is one adapter; the bot in this repo remains the local Socket Mode bot.
+The Workers + Durable Objects + Containers runtime now lives in its own repo: [**chester-hill-solutions/cf-opencode**](https://github.com/chester-hill-solutions/cf-opencode). It is a transport-neutral harness — one Durable Object per conversation, local S3 (stow-s3) for the hot workspace, R2 for cold checkpoints, and an HTTP/SSE core. Slack is one adapter; the bot in this repo remains the local Socket Mode bot.
 
 ## Security
 
